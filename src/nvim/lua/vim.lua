@@ -386,4 +386,75 @@ do
   vim.wo = new_win_opt_accessor(nil)
 end
 
+  --- Wrapper around |vim.loop| to provide a convenience method like |jobstart()|.
+  -- *NOTE:* If your callbacks call any Vim functions, you *must* wrap them with |vim.schedule_wrap()|
+  -- *before* passing them to |vim.jobstart()|.
+  --@see |jobstart()|
+  ---
+  --@param cmd  Identical to {cmd} in |jobstart()|.
+  --@param opts Identical to |jobstart-options|.
+  --@returns a job handle on success and nil otherwise
+function vim.jobstart(cmd, opts)
+  -- Determine if we need to split the command or not
+  if type(cmd) == "string" then
+    -- NOTE: We could call vim.fn.split here to maintain perfect compatibility
+    local split_pattern = "%s+"
+    local shell_cmd = vim.list_extend(vim.split(vim.o.shell, split_pattern), vim.split(vim.o.shellcmdflag, split_pattern))
+    cmd = vim.list_extend(shell_cmd, {'"' .. cmd .. '"'})
+  end
+
+  local job_options = vim.deepcopy(opts)
+  job_options.args = table.unpack(cmd, 2)
+  cmd = cmd[1]
+  -- TODO: Check for valid options, like in src/nvim/eval/funcs.c
+  if opts.clear_env then
+    job_options.env = opts.env
+  elseif opts.env then
+    job_options.env = vim.tbl_extend(vim.fn.environ(), opts.env, "force")
+  end
+
+  job_options.detached = opts.detach
+  -- TODO: Handle pty and rpc options
+
+  -- Set up pipes as needed
+  job_options.stdio = {}
+  if opts.on_stdout then
+    job_options.stdio.stdout = vim.loop.new_pipe(false)
+  end
+
+  if opts.on_stderr then
+    job_options.stdio.stderr = vim.loop.new_pipe(false)
+  end
+
+  -- Separate out the callback
+  local on_exit = opts.on_exit
+
+  -- Start the job
+  local handle = nil
+  handle = vim.loop.spawn(cmd, job_options, function()
+    if job_options.stdio.stdout then
+      job_options.stdio.stdout:read_stop()
+      job_options.stdio.stdout:close()
+    end
+
+    if job_options.stdio.stderr then
+      job_options.stdio.stderr:read_stop()
+      job_options.stdio.stderr:close()
+    end
+
+    handle:close()
+    on_exit(opts)
+  end)
+
+  if job_options.stdio.stdout then
+    vim.loop.read_start(job_options.stdio.stdout, opts.on_stdout)
+  end
+
+  if job_options.stdio.stderr then
+    vim.loop.read_start(job_options.stdio.stderr, opts.on_stderr)
+  end
+
+  return handle
+end
+
 return module
