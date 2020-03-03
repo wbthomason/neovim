@@ -404,7 +404,7 @@ function vim.jobstart(cmd, opts)
   end
 
   local job_options = vim.deepcopy(opts)
-  job_options.args = table.unpack(cmd, 2)
+  job_options.args = unpack(cmd, 2)
   cmd = cmd[1]
   -- TODO: Check for valid options, like in src/nvim/eval/funcs.c
   if opts.clear_env then
